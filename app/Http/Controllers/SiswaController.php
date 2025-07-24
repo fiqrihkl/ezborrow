@@ -9,7 +9,9 @@ use Yajra\DataTables\DataTables;
 
 class SiswaController extends Controller
 {
-    // Menampilkan daftar siswa dengan pencarian dan filter
+    /**
+     * Menampilkan daftar siswa dengan pencarian dan filter.
+     */
     public function index(Request $request)
     {
         $query = Siswa::query();
@@ -17,8 +19,7 @@ class SiswaController extends Controller
         // Filter pencarian jika ada
         if ($request->has('search') && $request->search !== '') {
             $query->where('nama_lengkap', 'like', '%' . $request->search . '%')
-                ->orWhere('nisn', 'like', '%' . $request->search . '%')
-                ->orWhere('nik', 'like', '%' . $request->search . '%');
+                ->orWhere('nisn', 'like', '%' . $request->search . '%');
         }
 
         // Filter berdasarkan kelas
@@ -35,15 +36,17 @@ class SiswaController extends Controller
         return view('siswa.index', compact('siswa', 'kelasList'));
     }
 
-
-
-    // Menampilkan form tambah siswa
+    /**
+     * Menampilkan form tambah siswa.
+     */
     public function create()
     {
         return view('siswa.create');
     }
 
-    // Menyimpan data siswa baru
+    /**
+     * Menyimpan data siswa baru.
+     */
     public function store(Request $request)
     {
         // Validasi input
@@ -51,13 +54,11 @@ class SiswaController extends Controller
             'nama_lengkap' => 'required',
             'jenis_kelamin' => 'required|in:Laki-laki,Perempuan',
             'nisn' => 'required',
-            'nik' => 'required',
             'kelas' => 'required',
         ]);
         try {
             // Cek apakah NISN sudah ada di database
             if (Siswa::where('nisn', $request->nisn)->exists()) {
-                //kirim pesan eror ke index
                 return redirect()->route('siswa.index')->with('error', 'NISN sudah terdaftar, silakan periksa kembali.');
             }
             // Simpan data siswa baru
@@ -69,20 +70,23 @@ class SiswaController extends Controller
         }
     }
 
-    // Menampilkan form untuk edit siswa
+    /**
+     * Menampilkan form untuk edit siswa.
+     */
     public function edit(Siswa $siswa)
     {
         return view('siswa.edit', compact('siswa'));
     }
 
-    // Melakukan update data siswa
+    /**
+     * Melakukan update data siswa.
+     */
     public function update(Request $request, Siswa $siswa)
     {
         $request->validate([
             'nama_lengkap' => 'required',
             'jenis_kelamin' => 'required|in:Laki-laki,Perempuan',
             'nisn' => 'required',
-            'nik' => 'required',
             'kelas' => 'required',
         ]);
 
@@ -94,14 +98,6 @@ class SiswaController extends Controller
             return redirect()->route('siswa.index')->with('error', 'NISN sudah terdaftar, silakan periksa kembali.');
         }
 
-        // Cek jika ada siswa lain yang menggunakan NIK yang sama
-        if (Siswa::where('nik', $request->nik)
-            ->where('id_siswa', '!=', $siswa->id_siswa)
-            ->exists()
-        ) {
-            return redirect()->route('siswa.index')->with('error', 'NIK sudah terdaftar, silakan periksa kembali.');
-        }
-
         try {
             $siswa->update($request->all());
             return redirect()->route('siswa.index')->with('success', 'Data siswa berhasil diperbarui.');
@@ -110,63 +106,100 @@ class SiswaController extends Controller
         }
     }
 
-
-    // Menghapus data siswa
+    /**
+     * Menghapus data siswa.
+     */
     public function destroy(Siswa $siswa)
     {
         $siswa->delete();
         return redirect('/siswa')->with('success', 'Data siswa berhasil dihapus');
     }
 
-    // Fungsi Import Data Siswa dari Excel
+    /**
+     * Fungsi Import Data Siswa dari Excel.
+     * Jika data dengan NISN yang sama sudah ada, maka akan di-update.
+     * Jika belum ada, maka akan dibuat data baru.
+     */
     public function import(Request $request)
     {
-        // Validasi file Excel
+        // 1. Validasi file Excel
         $request->validate([
-            'excel_file' => 'required|mimes:xlsx,csv',
+            'excel_file' => 'required|mimes:xlsx,xls,csv',
         ]);
 
-        // Ambil file yang diupload
-        $file = $request->file('excel_file');
-
-        // Pastikan file tidak kosong
-        if (!$file->isValid()) {
-            return redirect()->route('siswa.index')->with('error', 'File yang diupload tidak valid.');
-        }
-
-        // Membaca file Excel
         try {
+            // 2. Ambil file yang diupload dan baca menggunakan PhpSpreadsheet
+            $file = $request->file('excel_file');
             $spreadsheet = IOFactory::load($file);
-        } catch (\Exception $e) {
-            return redirect()->route('siswa.index')->with('error', 'Gagal membaca file Excel. Pastikan file formatnya benar.');
-        }
+            $sheet = $spreadsheet->getActiveSheet();
+            $data = $sheet->toArray(null, true, true, true);
 
-        // Ambil data dari sheet pertama
-        $sheet = $spreadsheet->getActiveSheet();
-        $data = $sheet->toArray();
+            $createdCount = 0;
+            $updatedCount = 0;
+            $failedRows = [];
 
-        // Import data ke database, lewat loop
-        foreach ($data as $index => $row) {
-            if ($index == 0) continue; // Skip header
+            // 3. Looping data dari Excel, mulai dari baris kedua
+            foreach (array_slice($data, 1) as $rowIndex => $row) {
+                // ## PERUBAHAN DISINI ##
+                // Sesuaikan dengan format baru: | No | NISN | Nama Lengkap | Jenis Kelamin | Kelas |
+                // NISN sekarang ada di kolom B
+                $nisn = $row['B'] ?? null; 
 
-            // Validasi data dan simpan ke database
-            try {
-                Siswa::create([
-                    'nama_lengkap' => $row[0], // Kolom pertama = nama_lengkap
-                    'jenis_kelamin' => $row[1], // Kolom kedua = jenis_kelamin
-                    'nisn' => $row[2], // Kolom ketiga = nisn
-                    'nik' => $row[3], // Kolom keempat = nik
-                    'kelas' => $row[4], // Kolom kelima = kelas
-                ]);
-            } catch (\Exception $e) {
-                // Tangani jika ada kesalahan pada data baris tertentu
-                continue; // Anda bisa menambahkan log atau pemberitahuan jika ingin melaporkan kesalahan pada data
+                // Skip baris jika NISN (kunci utama) kosong
+                if (empty($nisn)) {
+                    $failedRows[] = $rowIndex + 2;
+                    continue;
+                }
+
+                try {
+                    // 4. Gunakan updateOrCreate() dengan mapping kolom yang baru
+                    $siswa = Siswa::updateOrCreate(
+                        ['nisn' => $nisn],
+                        [
+                            'nama_lengkap'  => $row['C'] ?? null, // Kolom C
+                            'jenis_kelamin' => $row['D'] ?? null, // Kolom D
+                            'kelas'         => $row['E'] ?? null, // Kolom E
+                        ]
+                    );
+
+                    // 5. Hitung data yang dibuat atau diupdate
+                    if ($siswa->wasRecentlyCreated) {
+                        $createdCount++;
+                    } elseif ($siswa->wasChanged()) {
+                        $updatedCount++;
+                    }
+                } catch (\Illuminate\Database\QueryException $e) {
+                    $failedRows[] = $rowIndex + 2;
+                }
             }
-        }
 
-        return redirect()->route('siswa.index')->with('success', 'Data siswa berhasil diimpor!');
+            // 6. Buat pesan feedback yang informatif
+            $message = "Proses impor selesai. ";
+            if ($createdCount > 0) {
+                $message .= "$createdCount data baru ditambahkan. ";
+            }
+            if ($updatedCount > 0) {
+                $message .= "$updatedCount data berhasil diperbarui. ";
+            }
+            if (empty($failedRows) && $createdCount == 0 && $updatedCount == 0) {
+                return redirect()->route('siswa.index')->with('info', 'Tidak ada data yang diimpor atau diperbarui.');
+            }
+
+            if (!empty($failedRows)) {
+                $message .= "Gagal mengimpor data pada baris: " . implode(', ', $failedRows) . ".";
+                return redirect()->route('siswa.index')->with('warning', $message);
+            }
+
+            return redirect()->route('siswa.index')->with('success', $message);
+
+        } catch (\Exception $e) {
+            return redirect()->route('siswa.index')->with('error', 'Gagal membaca file Excel. Pastikan formatnya benar. Error: ' . $e->getMessage());
+        }
     }
 
+    /**
+     * Mengambil data untuk DataTables.
+     */
     public function getData(Request $request)
     {
         $query = \App\Models\Siswa::query();

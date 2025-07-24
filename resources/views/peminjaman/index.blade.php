@@ -13,11 +13,15 @@
         
         <!-- Kamera Preview -->
         <div id="preview" style="position: relative; width: 100%; max-width: 400px; height: 300px; margin: 0 auto;">
-  <div id="scanner-overlay">
-    <div class="laser"></div>
-  </div>
-</div>
+          <div id="scanner-overlay">
+            <div class="laser"></div>
+          </div>
+        </div>
 
+        <!-- Tombol Switch Camera di bawah kamera -->
+        <div class="text-center mt-3">
+          <button id="switch-camera" class="btn btn-primary">Ganti Kamera</button>
+        </div>
 
         <!-- Form tersembunyi -->
         <form id="scan-form" method="GET" action="{{ url('/peminjaman/result') }}" style="display: none;">
@@ -84,7 +88,11 @@
 
 <script>
     const html5QrCode = new Html5Qrcode("preview");
+    let currentCameraIndex = 0;
+    let cameras = [];
+    let hasScanned = false;
 
+    // Tampilkan alert dari session jika ada
     @if(session('success'))
         Swal.fire({
             icon: 'success',
@@ -105,44 +113,68 @@
         });
     @endif
 
+    // Fungsi memulai kamera
+    function startCamera(cameraId) {
+        html5QrCode.start(
+            cameraId,
+            { fps: 10, qrbox: 250 },
+            qrCodeMessage => {
+                if (hasScanned) return;
+                hasScanned = true;
+
+                document.getElementById('beep-sound').play();
+
+                Swal.fire({
+                    title: 'QR Code Ditemukan',
+                    text: `Kode Chromebook: ${qrCodeMessage}`,
+                    icon: 'success',
+                    timer: 3000,
+                    showConfirmButton: false,
+                    timerProgressBar: true,
+                    willClose: () => {
+                        document.getElementById('kode_chromebook').value = qrCodeMessage;
+                        document.getElementById('scan-form').submit();
+                        html5QrCode.stop();
+                    }
+                });
+            },
+            errorMessage => {
+                // Tidak perlu alert, cukup silent
+                console.warn("Scan error:", errorMessage);
+            }
+        ).catch(err => {
+            console.error("Gagal memulai kamera:", err);
+        });
+    }
+
+    // Inisialisasi kamera
     Html5Qrcode.getCameras().then(devices => {
-        if (devices && devices.length) {
-            let cameraId = devices[0].id;
-            let hasScanned = false;
-
-            html5QrCode.start(
-                cameraId,
-                { fps: 10, qrbox: 250 },
-                qrCodeMessage => {
-                    if (hasScanned) return;
-                    hasScanned = true;
-
-                    // Mainkan suara beep
-                    document.getElementById('beep-sound').play();
-
-                    Swal.fire({
-                        title: 'QR Code Ditemukan',
-                        text: `Kode Chromebook: ${qrCodeMessage}`,
-                        icon: 'success',
-                        timer: 3000,
-                        showConfirmButton: false,
-                        timerProgressBar: true,
-                        willClose: () => {
-                            document.getElementById('kode_chromebook').value = qrCodeMessage;
-                            document.getElementById('scan-form').submit();
-                            html5QrCode.stop();
-                        }
-                    });
-                },
-                errorMessage => {
-                    console.error("Kesalahan saat scan QR: ", errorMessage);
-                }
-            );
+        if (devices.length > 0) {
+            cameras = devices;
+            startCamera(cameras[currentCameraIndex].id);
         } else {
             console.error("Tidak ada kamera ditemukan.");
         }
     }).catch(err => {
         console.error("Gagal mendapatkan kamera: ", err);
+    });
+
+    // Tombol Ganti Kamera
+    document.getElementById('switch-camera').addEventListener('click', () => {
+        if (cameras.length < 2) {
+            alert("Hanya ada satu kamera yang tersedia.");
+            return;
+        }
+
+        currentCameraIndex = (currentCameraIndex + 1) % cameras.length;
+        const newCameraId = cameras[currentCameraIndex].id;
+
+        html5QrCode.stop().then(() => {
+            hasScanned = false; // Reset agar bisa scan lagi
+            startCamera(newCameraId);
+        }).catch(err => {
+            console.error("Gagal mengganti kamera:", err);
+        });
     });
 </script>
 @endpush
